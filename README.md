@@ -34,7 +34,8 @@ BACKEND_PORT_{$BACKEND_PORT}_TCP_ADDR 0.0.0.0
 TELNET_ADDR 0.0.0.0
 TELNET_PORT 6083
 CACHE_SIZE 25MB
-THROTTLE_LIMIT 150req/30s
+THROTTLE_LIMIT_NUMBER 300
+THROTTLE_LIMIT_TIME 60s
 VCL_FILE /etc/varnish/default.vcl
 GRACE_TTL 30s
 GRACE_MAX 1h
@@ -85,7 +86,7 @@ For example:
 
 Then the url would be `http://[host_IP]:49475` - you should see the cached version of the site you have defined in your vcl file.
 
-### Varnish Config 
+### Varnish Config
 Due to the way varnish works with it's config file, there is no easy way to pass environment variables to it.
 People have come up with a work-around:
 http://stackoverflow.com/questions/21056450/how-to-inject-environment-variables-in-varnish-configuration - and that is actually similar to what this image is doing.
@@ -101,7 +102,7 @@ The run command (part of the image) replaces the defined variables in the source
 variable values using sed and outputs it to the .vcl file.  Then it starts varnish and reads the .vcl file.
 So you can think of default.vcl.source as a template and the .vcl file as throwaway (as it get's overwritten every startup).
 
-One thing to note is whatever you define in the yml file (VCL_FILE: /etc/varnish/default.vcl) needs a matching .source 
+One thing to note is whatever you define in the yml file (VCL_FILE: /etc/varnish/default.vcl) needs a matching .source
 
 #### Example _default.vcl.source_
 ```vcl

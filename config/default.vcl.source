@@ -1,4 +1,6 @@
-import throttle;
+vcl 4.0;
+import std;
+import vsthrottle;
 
 backend default {
   .host = "$(eval "echo \$BACKEND_PORT_${BACKEND_ENV_PORT}_TCP_ADDR")";
@@ -9,21 +11,15 @@ backend default {
 # First decide whether or not to lookup data in the cache.
 sub vcl_recv {
   # Pipe requests that are non-RFC2616 or CONNECT which is weird.
-  if (req.request != "GET" &&
-      req.request != "HEAD" &&
-      req.request != "PUT" &&
-      req.request != "POST" &&
-      req.request != "PATCH" &&
-      req.request != "TRACE" &&
-      req.request != "OPTIONS" &&
-      req.request != "DELETE") {
+  if (req.method != "GET" &&
+      req.method != "HEAD" &&
+      req.method != "PUT" &&
+      req.method != "POST" &&
+      req.method != "PATCH" &&
+      req.method != "TRACE" &&
+      req.method != "OPTIONS" &&
+      req.method != "DELETE") {
     return(pipe);
-  }
-
-  if (req.backend.healthy) {
-     set req.grace = ${GRACE_TTL};
-  } else {
-     set req.grace = ${GRACE_MAX};
   }
 
   if (req.http.Authorization || req.http.Authenticate) {
@@ -31,12 +27,12 @@ sub vcl_recv {
   }
 
   # Pass requests that are not GET or HEAD
-  if (req.request != "GET" && req.request != "HEAD") {
+  if (req.method != "GET" && req.method != "HEAD") {
     return(pass);
   }
 
-  if (throttle.is_allowed("ip:" + client.ip, "${THROTTLE_LIMIT}") > 0s) {
-    error 429 "Too many requests";
+  if (vsthrottle.is_denied("ip:" + client.ip, ${THROTTLE_LIMIT_NUMBER}, ${THROTTLE_LIMIT_TIME})) {
+    return (synth(429, "Too Many Requests"));
   }
 
   if (req.http.x-forwarded-for) {
@@ -58,19 +54,19 @@ sub vcl_recv {
      set req.http.Accept-Encoding = "deflate";
     } else {
      # unknown algorithm. Probably junk, remove it
-     remove req.http.Accept-Encoding;
+     unset req.http.Accept-Encoding;
     }
   }
 
   # Clear cookie and authorization headers, set grace time, lookup in the cache
   unset req.http.Cookie;
   unset req.http.Authorization;
-  return(lookup);
+  return(hash);
 }
 
 # Called when entering pipe mode
 sub vcl_pipe {
-  set bereq.http.connection = "close";
+  set bereq.http.Connection = "close";
 
   if (req.http.X-Forwarded-For) {
     set bereq.http.X-Forwarded-For = req.http.X-Forwarded-For;
@@ -81,32 +77,27 @@ sub vcl_pipe {
 }
 
 sub vcl_pass {
-  set bereq.http.connection = "close";
-
-  if (req.http.X-Forwarded-For) {
-    set bereq.http.X-Forwarded-For = req.http.X-Forwarded-For;
-  } else {
-    set bereq.http.X-Forwarded-For = regsub(client.ip, ":.*", "");
-  }
   #return (pass);
 }
 
 # Called when the requested object has been retrieved from the
 # backend, or the request to the backend has failed
-sub vcl_fetch {
+sub vcl_backend_response {
   # Set the grace time
   set beresp.grace = ${GRACE_MAX};
 
   # Do not cache the object if the status is not in the 200s
   if (beresp.status >= 300) {
     # Remove the Set-Cookie header
-    remove beresp.http.Set-Cookie;
-    return(hit_for_pass);
+    unset beresp.http.Set-Cookie;
+    set beresp.uncacheable = true;
+    return(deliver);
   }
 
   # Do not cache the object if the backend application does not want us to.
   if (beresp.http.Cache-Control ~ "(no-cache|no-store|private|must-revalidate)") {
-    return(hit_for_pass);
+    set beresp.uncacheable = true;
+    return(deliver);
   }
 
   if (beresp.ttl <= 0s ||
@@ -116,13 +107,14 @@ sub vcl_fetch {
     * Mark as "Hit-For-Pass"
     */
     set beresp.ttl = ${GRACE_TTL};
-    return (hit_for_pass);
+    set beresp.uncacheable = true;
+    return (deliver);
   }
 
   # Everything below here should be cached
 
   # Remove the Set-Cookie header
-  remove beresp.http.Set-Cookie;
+  unset beresp.http.Set-Cookie;
 
   # Deliver the object
   return (deliver);
@@ -148,15 +140,15 @@ sub vcl_deliver {
   return (deliver);
 }
 
-sub vcl_error {
-  set obj.http.Content-Type = "application/json; charset=utf-8";
-  set obj.http.Retry-After = "5";
-  synthetic {"{
-  "status":""} + obj.status + {"",
-  "response":""} + obj.response + {"",
-  "xid":""} + req.xid + {"",
+sub vcl_backend_error {
+  set beresp.http.Content-Type = "application/json; charset=utf-8";
+  set beresp.http.Retry-After = "5";
+  synthetic ({"{
+  "status":""} + beresp.http.status + {"",
+  "response":""} + beresp.http.response + {"",
+  "xid":""} + bereq.xid + {"",
   "message":"Varnish cache server error"
-  }"};
+  }"});
   return (deliver);
   }
 

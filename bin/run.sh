@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 
 # Replace variables in the varnish config file
 
@@ -21,5 +22,6 @@ fi
 cat $VCL_FILE
 
 # Starts the varnish server
-echo "Running varnishd -a $LISTEN_ADDR:$LISTEN_PORT -T $TELNET_ADDR:$TELNET_PORT -f $VCL_FILE -s file,/var/cache/varnish.cache,$CACHE_SIZE -F ; ldconfig ; varnishncsa"
-varnishd -a "$LISTEN_ADDR:$LISTEN_PORT" -T $TELNET_ADDR:$TELNET_PORT -f "$VCL_FILE" -s "file,/var/cache/varnish.cache,$CACHE_SIZE" -F ; ldconfig ; varnishncsa
+varnishd -a "$LISTEN_ADDR:$LISTEN_PORT" -T $TELNET_ADDR:$TELNET_PORT -f "$VCL_FILE" -s "file,/var/cache/varnish.cache,$CACHE_SIZE" $@
+ldconfig
+varnishncsa
